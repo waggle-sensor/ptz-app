@@ -123,8 +123,10 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
         
         try:
             Camera1.snap_shot(image_path)
+            return image_path
         except Exception as e:
             logger.error("Error saving detection image: %s", e)
+    return None
 
 def get_image_from_ptz_position(args, object_, pan, tilt, zoom, model, processor, prompt_prefix: str = ""):
     try:

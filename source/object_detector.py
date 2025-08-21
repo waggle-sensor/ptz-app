@@ -129,7 +129,7 @@ class FlorenceDetector(ObjectDetector):
         
         self.model.eval()
 
-    def detect(self, image: Image.Image, target_objects: Union[str, List[str]]) -> Tuple[List[float], List[List[int]], List[str]]:
+    def detect(self, image: Image.Image, target_objects: Union[str, List[str]], prompt_prefix: str = "") -> Tuple[List[float], List[List[int]], List[str]]:
         """Detect objects using Florence"""
         # Generate text prompt from target objects provided. The special case
         # of * should allow Florence-2 to detect any object which seems to

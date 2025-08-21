@@ -1,26 +1,58 @@
 # PTZ APP
 
-This is an application for sending images of specific objects autonomously using PTZ cameras.
+This is an intelligent, autonomous PTZ camera application that uses advanced vision-language models (YOLO or Florence-2) to detect, frame, and analyze objects of interest in real-time. It is designed for deployment on edge computing nodes within the Sage project.
+
+---
+
+## What’s New
+
+- **Florence-2 Enhancements**
+  - Automatic scene context generation at the start of scans.
+  - Support for manual prompt injection with `--prompt_prefix` to guide detections.
+
+- **Enhanced Data Logging**
+  - Publishes scene captions (Florence-2) and raw detection data (label, confidence, position) with each scan.
+  - Improved debug-level logging.
+
+- **Pipeline Updates**
+  - Added Scene Analysis step (Florence-2 only).
+  - Data Publishing step now explicitly includes metadata publishing.
+
+---
 
 ## How It Works
 
 The algorithm performs the following steps:
 
-1. **Initialization**: Sets up object detection model (YOLO or Florence) based on user parameters.
+1. **Initialization**  
+   Sets up the object detection model (`YOLO` or `Florence-2`) based on user parameters.
 
-2. **Area Scanning**: Systematically scans the environment by rotating the PTZ camera in pan steps (default: 15 degrees) through a full 360° rotation at the specified tilt and zoom level.
+2. **Scene Analysis (Florence-2 Only)**  
+   At the start of a scan, Florence-2 can automatically generate a detailed text caption of the current scene to use as a dynamic, contextual prompt.  
 
-3. **Object Detection**: At each camera position, captures an image and runs object detection to identify specified objects (e.g., person, car, dog).
+3. **Contextual Area Scanning**  
+   Systematically scans the environment by rotating the PTZ camera in pan steps (default: 15°) through a full 360° rotation at the specified tilt and zoom level.  
+   When using Florence-2, the generated (or user-specified) context is incorporated to improve detection relevance.
 
-4. **Filtering**: Filters detections based on confidence threshold (default: 0.1).
+4. **Object Detection**  
+   At each camera position, captures an image and runs object detection to identify specified objects (e.g., person, car, dog).
 
-5. **Object Tracking**: When an object of interest is detected with sufficient confidence, the algorithm:
+5. **Filtering**  
+   Filters detections based on confidence threshold (default: 0.1).
+
+6. **Object Tracking**  
+   When an object of interest is detected with sufficient confidence, the algorithm:
    - Centers the camera on the detected object
    - Adjusts zoom to maximize the object in the frame
 
-6. **Image Publishing**: Saves and publishes the optimized images of detected objects.
+7. **Data Publishing**  
+   Saves and publishes the optimized images of detected objects.  
+   Publishes rich metadata—including scene captions (Florence-2), raw detection data (labels, confidence, position), and logging outputs—to the Sage data portal.
 
-7. **Iteration**: Repeats the process for the specified number of iterations with configurable delay between scans.
+8. **Iteration**  
+   Repeats the process for the specified number of iterations with configurable delay between scans.
+
+---
 
 ## Build the container
 
@@ -51,6 +83,22 @@ sudo docker run -it --rm your_docker_hub_user_name/ptzapp:latest -ki -it 5 -un c
 ```bash
 sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --iterations 5 --username username --password 'password' --cameraip 130.202.23.92 --objects 'person,car'
 ```
+## Advanced Usage with Florence-2
+
+### Fully Autonomous Mode (Automatic Context)
+
+When using Florence-2 without a manual prompt, the application will automatically analyze the scene to generate its own context before searching for objects:
+
+```bash
+sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects 'animal,bird,deer' --username <user> --password '<pass>' --cameraip <ip>```
+
+### Manual Context Prompt
+
+You can provide your own context to the model using the `--prompt_prefix` argument to guide detections:
+
+```bash
+sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects 'animal,bird' --prompt_prefix 'A photo from a trail camera in a wilderness environment' --username <user> --password '<pass>' --cameraip <ip>```
+
 
 ## Using Different Object Detection Models
 
@@ -94,4 +142,5 @@ sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --mo
 | `--zoom` | `-zm` | Zoom value | 1 |
 | `--confidence` | `-conf` | Confidence threshold (0-1) | 0.1 |
 | `--iterdelay` | `-id` | Minimum delay in seconds between iterations | 60.0 |
+| `--prompt_prefix` |  | Manual text prompt for Florence-2 context | "" |
 | `--debug` | | Enable debug level logging | False |

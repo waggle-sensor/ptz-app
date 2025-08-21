@@ -13,7 +13,7 @@ from source.bring_data import (
     publish_images,
     grab_image,
 )
-from source import sunapi_control as camera_control
+from source import plantnet_client, sunapi_control as camera_control
 from source.object_detector import DetectorFactory, FlorenceDetector
 
 
@@ -89,6 +89,12 @@ def get_argparser():
         default="",
     )
     parser.add_argument(
+        "--species_zoom",
+        help="Additional relative zoom steps to apply for species identification (default=10).",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
         "-conf",
         "--confidence",
         help="Confidence threshold for detections (0-1, default=0.1)",
@@ -144,29 +150,72 @@ def look_for_object(args):
                         os.remove(image_path)
                     continue
 
+                # Publish the initial raw detection data first
                 detection_name = f"ptz.detection.p{pan}t{tilt}z{int(zoom)}"
                 detection_payload = {
                     "label": detection["label"],
-                    "confidence": 1 - detection["reward"],
-                    "bbox": detection["bbox"]
+                    "confidence": round(1 - detection["reward"], 4),
+                    "bbox": detection["bbox"],
+                    "ptz_position": [pan, tilt, zoom],
+                    "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
                 }
                 plugin.publish(detection_name, json.dumps(detection_payload))
                 print(f"Published detection: {detection_name}")
-                print(f"Detection payload: {detection_payload}")
 
-                label = detection["label"]
-                bbox = detection["bbox"]
-                reward = detection["reward"]
-                confidence = 1 - reward
-
-                print(f"Following {label} object (confidence: {confidence:.2f})")
-
+                # Now, decide which workflow to follow based on the detection
                 image = Image.open(image_path)
-                center_and_maximize_object(args, bbox, image, reward, label)
+                plant_labels = ['plant', 'flower', 'tree', 'wildflower', 'bush'] 
+                
+                if detection["label"].lower() in plant_labels:
+                    # --- THIS IS THE WORKFLOW FOR PLANTS ---
+                    print(f"Plant detected ({detection['label']}). Starting species identification workflow...")
+                    try:
+                        # Step 1 Zoom (Framing): Center and frame the entire plant.
+                        # This also saves the initial wide-shot of the plant.
+                        center_and_maximize_object(args, detection["bbox"], image, detection["reward"], detection["label"])
+                        
+                        # Step 2 Zoom (Detail Capture): For large plants, zoom in further.
+                        large_plant_labels = ['tree', 'bush']
+                        if detection["label"].lower() in large_plant_labels and args.species_zoom > 0:
+                            print(f"Performing additional zoom ({args.species_zoom}) for species detail...")
+                            cam = camera_control.CameraControl(args.cameraip, args.username, args.password)
+                            cam.relative_control(pan=0, tilt=0, zoom=args.species_zoom)
+                            time.sleep(2) # Wait for camera to stabilize
 
+                        # Final Snapshot & Identification: Take the close-up and send to PlantNet.
+                        print("Taking final snapshot for PlantNet...")
+                        cam = camera_control.CameraControl(args.cameraip, args.username, args.password)
+                        final_image_path = grab_image(camera=cam, args=args, action="plantnet_shot")
+
+                        if final_image_path:
+                            species_results = plantnet_client.identify_plant(final_image_path)
+                            
+                            if species_results:
+                                print(f"PlantNet Result: {species_results}")
+                                # Publish the general species identification results
+                                plugin.publish("ptz.plantnet.species", json.dumps(species_results))
+                                
+                                # Check for alerts
+                                species_name = species_results.get("species")
+                                if species_name:
+                                    alert_type, _ = alert_system.check_for_alert(species_name)
+                                    if alert_type:
+                                        print(f"!!! ALERT: {alert_type} '{species_name}' detected! Publishing alert.")
+                                        # Publish a special, high-priority alert
+                                        plugin.publish(f"ptz.alert.{alert_type}", json.dumps(species_results))
+                            
+                            if not args.keepimages:
+                                os.remove(final_image_path)
+                    except Exception as e:
+                        print(f"PlantNet identification failed: {e}")
+                else:
+                    # --- THIS IS THE WORKFLOW FOR ALL OTHER OBJECTS ---
+                    print(f"Following {detection['label']} object (confidence: {1 - detection['reward']:.2f})")
+                    center_and_maximize_object(args, detection["bbox"], image, detection["reward"], detection["label"])
+
+                # Clean up the initial temporary image used for detection in this step
                 if os.path.exists(image_path):
-                    os.remove(image_path)
-            
+                    os.remove(image_path)            
             publish_images(args)
 
             iteration_time = time.time() - iteration_start_time
