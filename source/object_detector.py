@@ -13,7 +13,7 @@ class ObjectDetector(ABC):
     """Abstract base class for object detection models"""
     
     @abstractmethod
-    def detect(self, image: Image.Image, target_objects: Union[str, List[str]]) -> Tuple[List[float], List[List[int]], List[str]]:
+    def detect(self, image: Image.Image, target_objects: Union[str, List[str]], prompt_prefix: str = "") -> Tuple[List[float], List[List[int]], List[str]]:
         """Detect objects in an image"""
         pass
 
@@ -138,8 +138,12 @@ class FlorenceDetector(ObjectDetector):
             text = "<OD>"
             task = "<OD>"
         elif isinstance(target_objects, list):
+            # We would add prompt_prefix as an argument to this function
             joined = " or ".join(target_objects)
-            text = f"<CAPTION_TO_PHRASE_GROUNDING> {joined}"
+            if prompt_prefix:
+                text = f"<CAPTION_TO_PHRASE_GROUNDING> {prompt_prefix} of a {joined}"
+            else:
+                text = f"<CAPTION_TO_PHRASE_GROUNDING> {joined}"
             task = "<CAPTION_TO_PHRASE_GROUNDING>"
         else:
             text = f"<CAPTION_TO_PHRASE_GROUNDING> {target_objects}"
@@ -191,6 +195,26 @@ class FlorenceDetector(ObjectDetector):
             rewards.append(area_ratio)
 
         return rewards, bboxes, labels
+
+    def caption(self, image: Image.Image) -> str:
+        """
+        Generates a detailed caption for a given image.
+        """
+        task_prompt = '<MORE_DETAILED_CAPTION>'
+        
+        # We use more tokens here to allow for longer, more descriptive captions.
+        inputs = self.processor(text=task_prompt, images=image, return_tensors="pt").to(self.device, self.torch_dtype)
+        generated_ids = self.model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_new_tokens=1024,
+            num_beams=3
+        )
+        generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        
+        # The model output includes the prompt, so we split it off to get only the caption.
+        caption = generated_text.split(task_prompt)[-1].strip()
+        return caption
 
 class DetectorFactory:
     """Factory class to create appropriate object detector"""
@@ -295,7 +319,7 @@ def get_label_from_image_and_object(
     image: Image.Image,
     target_object: str,
     detector: ObjectDetector,
-    processor=None  # Kept for backwards compatibility
+    prompt_prefix: str = "" 
 ) -> List[Dict]:
     """
     Unified interface for object detection

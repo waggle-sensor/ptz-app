@@ -126,7 +126,7 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
         except Exception as e:
             logger.error("Error saving detection image: %s", e)
 
-def get_image_from_ptz_position(args, object_, pan, tilt, zoom, model, processor):
+def get_image_from_ptz_position(args, object_, pan, tilt, zoom, model, processor, prompt_prefix: str = ""):
     try:
         Camera1 = camera_control.CameraControl(
             args.cameraip, args.username, args.password
@@ -141,7 +141,7 @@ def get_image_from_ptz_position(args, object_, pan, tilt, zoom, model, processor
     image = Image.open(aux_image_path)
     os.remove(aux_image_path)
 
-    detections = get_label_from_image_and_object(image, object_, model, processor)
+    detections = get_label_from_image_and_object(image, object_, model, prompt_prefix)
     
     if not detections:
         LABEL = None

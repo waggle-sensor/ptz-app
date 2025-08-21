@@ -3,7 +3,7 @@ pywaggle[all]
 huggingface_hub
 ultralytics>=8.3.70
 torch>=2.0.0
-transformers>=4.30.0
+transformers==4.40.2
 pillow>=9.0.0
-numpy>=1.21.0
+numpy<2.0
 requests>=2.25.0

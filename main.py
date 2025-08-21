@@ -3,13 +3,18 @@ import sys
 import argparse
 import time
 from PIL import Image
+from waggle.plugin import Plugin
+import json
+import logging
+
 from source.bring_data import (
     center_and_maximize_object,
     get_image_from_ptz_position,
     publish_images,
+    grab_image,
 )
-from source.object_detector import DetectorFactory
-import logging
+from source import sunapi_control as camera_control
+from source.object_detector import DetectorFactory, FlorenceDetector
 
 
 def get_argparser():
@@ -78,6 +83,12 @@ def get_argparser():
         default=60.0,
     )
     parser.add_argument(
+        "--prompt_prefix",
+        help="An optional prefix to add to the Florence prompt for context.",
+        type=str,
+        default="",
+    )
+    parser.add_argument(
         "-conf",
         "--confidence",
         help="Confidence threshold for detections (0-1, default=0.1)",
@@ -100,41 +111,70 @@ def look_for_object(args):
         print(f"Error creating detector: {str(e)}")
         sys.exit(1)
 
-    for iteration in range(args.iterations):
-        iteration_start_time = time.time()
+    with Plugin() as plugin:
+        for iteration in range(args.iterations):
+            iteration_start_time = time.time()
+            
+            dynamic_prompt_prefix = args.prompt_prefix
+            if not dynamic_prompt_prefix and isinstance(detector, FlorenceDetector):
+                print("Generating dynamic context caption for the scene...")
+                try:
+                    cam = camera_control.CameraControl(args.cameraip, args.username, args.password)
+                    cam.absolute_control(pans[0], tilts[0], zooms[0])
+                    temp_image_path = grab_image(camera=cam, args=args, action="caption_shot")
+                    
+                    if temp_image_path:
+                        image = Image.open(temp_image_path)
+                        dynamic_prompt_prefix = detector.caption(image)
+                        os.remove(temp_image_path)
+                        print(f"Scene Context: \"{dynamic_prompt_prefix}\"")
+                        plugin.publish("ptz.scene.caption", dynamic_prompt_prefix)
 
-        for pan, tilt, zoom in zip(pans, tilts, zooms):
-            print(f"Trying PTZ: {pan} {tilt} {zoom}")
-            image_path, detection = get_image_from_ptz_position(
-                args, objects, pan, tilt, zoom, detector, None
-            )
+                except Exception as e:
+                    print(f"Could not generate dynamic caption: {e}")
 
-            if detection is None or detection["reward"] > (1 - args.confidence):
-                if image_path and os.path.exists(image_path):
+            for pan, tilt, zoom in zip(pans, tilts, zooms):
+                print(f"Trying PTZ: {pan} {tilt} {zoom}")
+                image_path, detection = get_image_from_ptz_position(
+                    args, objects, pan, tilt, zoom, detector, None, dynamic_prompt_prefix
+                )
+
+                if detection is None or detection["reward"] > (1 - args.confidence):
+                    if image_path and os.path.exists(image_path):
+                        os.remove(image_path)
+                    continue
+
+                detection_name = f"ptz.detection.p{pan}t{tilt}z{int(zoom)}"
+                detection_payload = {
+                    "label": detection["label"],
+                    "confidence": 1 - detection["reward"],
+                    "bbox": detection["bbox"]
+                }
+                plugin.publish(detection_name, json.dumps(detection_payload))
+                print(f"Published detection: {detection_name}")
+                print(f"Detection payload: {detection_payload}")
+
+                label = detection["label"]
+                bbox = detection["bbox"]
+                reward = detection["reward"]
+                confidence = 1 - reward
+
+                print(f"Following {label} object (confidence: {confidence:.2f})")
+
+                image = Image.open(image_path)
+                center_and_maximize_object(args, bbox, image, reward, label)
+
+                if os.path.exists(image_path):
                     os.remove(image_path)
-                continue
+            
+            publish_images(args)
 
-            label = detection["label"]
-            bbox = detection["bbox"]
-            reward = detection["reward"]
-            confidence = 1 - reward
-
-            print(f"Following {label} object (confidence: {confidence:.2f})")
-
-            image = Image.open(image_path)
-            center_and_maximize_object(args, bbox, image, reward, label)
-
-            if os.path.exists(image_path):
-                os.remove(image_path)
-
-        publish_images()
-
-        iteration_time = time.time() - iteration_start_time
-        if args.iterdelay > 0:
-            remaining_delay = max(0, args.iterdelay - iteration_time)
-            if remaining_delay > 0:
-                print(f"Waiting {remaining_delay:.2f} seconds before next iteration...")
-                time.sleep(remaining_delay)
+            iteration_time = time.time() - iteration_start_time
+            if args.iterdelay > 0:
+                remaining_delay = max(0, args.iterdelay - iteration_time)
+                if remaining_delay > 0:
+                    print(f"Waiting {remaining_delay:.2f} seconds before next iteration...")
+                    time.sleep(remaining_delay)
 
 
 def main():

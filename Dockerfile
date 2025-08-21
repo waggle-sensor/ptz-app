@@ -4,6 +4,12 @@ FROM nvcr.io/nvidia/pytorch:24.06-py3
 WORKDIR /app
 COPY . ./
 
+# --- TEMPORARY WORKAROUND for local testing on proxied networks ---
+# WARNING: This is insecure and should be removed for the final build.
+ENV PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org"
+ENV HUGGING_FACE_HUB_DISABLE_CERT_CHECK=1
+# ----------------------------------------------------------------
+
 # 2. Install dependencies
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
