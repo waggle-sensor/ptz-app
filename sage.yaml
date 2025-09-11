@@ -1,4 +1,4 @@
-name: "ptzapp"               # or keep your existing name if you want an in-place update
+name: "ptzapp"
 namespace: "waggle"
 description: "Intelligent Pan–Tilt–Zoom camera app with YOLO/Florence detection and PlantNet species ID (fork with enhancements)."
 version: "0.2.0"
