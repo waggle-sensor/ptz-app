@@ -65,7 +65,12 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
     except Exception as e:
         logger.error("Error when getting camera: %s", e)
 
-    _, _, zoom_level = Camera1.requesting_cameras_position_information()
+    try:
+        _, _, zoom_level = Camera1.requesting_cameras_position_information()
+    except Exception as e:
+        logger.warning("PTZ status query failed (%s). Falling back to last commanded zoom=%s.", e, args.zoom)
+        zoom_level = args.zoom  # safe fallback
+
     print(f'zoom_level: {zoom_level}')
 
     # Get current FOV based on zoom level
@@ -83,12 +88,17 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
     print(f'Tilt: {tilt}')
     try:
         Camera1.relative_control(pan=pan, tilt=tilt)
+        time.sleep(0.6)
     except Exception as e:
         logger.error("Error when setting relative position: %s", e)
     
     # Calculate the current size of the bounding box
     bbox_width = x2 - x1
     bbox_height = y2 - y1
+    if bbox_width <= 1 or bbox_height <= 1:
+        logger.warning("BBox too small to zoom safely (w=%s h=%s). Skipping zoom.", bbox_width, bbox_height)
+        bbox_width = max(bbox_width, 2)
+        bbox_height = max(bbox_height, 2)
     
     # Calculate the zoom factor to maximize the object size
     zoom_factor_x = image_width / bbox_width
@@ -104,6 +114,7 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
     current_zoom_factor = zoom_level / MZ
     target_zoom_factor = current_zoom_factor * zoom_factor
     relative_zoom = target_zoom_factor * (MZ - mz) - zoom_level
+    relative_zoom = max(-(MZ - mz), min(MZ - mz, relative_zoom))
     print('current_zoom_factor: ', current_zoom_factor)
     print('target_zoom_factor: ', target_zoom_factor)
     
@@ -112,6 +123,7 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
     print(f'Relative zoom: {relative_zoom}')
     try:
         Camera1.relative_control(pan=0, tilt=0, zoom=relative_zoom)
+        time.sleep(0.8)
     except Exception as e:
         logger.error("Error when setting relative position: %s", e)
 
@@ -122,6 +134,7 @@ def center_and_maximize_object(args, bbox, image, reward=None, label=None):
         image_path = os.path.join(tmp_dir, filename)
         
         try:
+            tmp_dir.mkdir(exist_ok=True, mode=0o777)
             Camera1.snap_shot(image_path)
             return image_path
         except Exception as e:
@@ -137,11 +150,22 @@ def get_image_from_ptz_position(args, object_, pan, tilt, zoom, model, processor
         logger.error("Error when getting camera: %s", e)
 
     Camera1.absolute_control(pan, tilt, zoom)
+    time.sleep(0.6)  # settle before first shot
     tmp_dir.mkdir(exist_ok=True, mode=0o777)
 
     aux_image_path = grab_image(camera=Camera1, args=args, action=0)
-    image = Image.open(aux_image_path)
-    os.remove(aux_image_path)
+    if not aux_image_path or not os.path.exists(aux_image_path):
+        # No image captured; return early (no detection)
+        return None, None
+
+    # Safely read and free the file before deletion
+    with Image.open(aux_image_path) as _im:
+        _im.load()                 # force read into memory
+        image = _im.copy()         # detach from file handle
+    try:
+        os.remove(aux_image_path)
+    except Exception:
+        pass
 
     detections = get_label_from_image_and_object(image, object_, model, prompt_prefix)
     
@@ -158,18 +182,17 @@ def get_image_from_ptz_position(args, object_, pan, tilt, zoom, model, processor
         }
 
     image_path = grab_image(camera=Camera1, args=args, action=random.randint(0,20))
+    if not image_path or not os.path.exists(image_path):
+        return None, None
     return image_path, LABEL
 
-def publish_images():
+def publish_images(keep=False):
     with Plugin() as plugin:
         ct = str(datetime.datetime.now())
         for image_file in os.listdir(tmp_dir):
-            complete_path = os.path.join(tmp_dir, image_file)
-            print('Publishing')
-            print(complete_path)
-            plugin.upload_file(complete_path)
-
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+            plugin.upload_file(os.path.join(tmp_dir, image_file))
+    if not keep:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 def get_fov_from_zoom(zoom_level):
     # Camera specifications
