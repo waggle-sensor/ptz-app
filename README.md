@@ -90,14 +90,16 @@ sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --mo
 When using Florence-2 without a manual prompt, the application will automatically analyze the scene to generate its own context before searching for objects:
 
 ```bash
-sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects 'animal,bird,deer' --username <user> --password '<pass>' --cameraip <ip>```
+sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects 'animal,bird,deer' --username <user> --password '<pass>' --cameraip <ip>
+```
 
 ### Manual Context Prompt
 
 You can provide your own context to the model using the `--prompt_prefix` argument to guide detections:
 
 ```bash
-sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects 'animal,bird' --prompt_prefix 'A photo from a trail camera in a wilderness environment' --username <user> --password '<pass>' --cameraip <ip>```
+sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects 'animal,bird' --prompt_prefix 'A photo from a trail camera in a wilderness environment' --username <user> --password '<pass>' --cameraip <ip>
+```
 
 
 ## Using Different Object Detection Models
@@ -144,3 +146,89 @@ sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --mo
 | `--iterdelay` | `-id` | Minimum delay in seconds between iterations | 60.0 |
 | `--prompt_prefix` |  | Manual text prompt for Florence-2 context | "" |
 | `--debug` | | Enable debug level logging | False |
+
+## Environment Variables
+1. `PLANTNET_API_KEY` — for PlantNet API calls
+2. `BLUR_MIN` — Laplacian variance threshold to trigger a focus retry (default ~120)
+3. `SPECIES_MIN_SCORE` — minimum PlantNet confidence to treat as “confident” (e.g., 0.25)
+
+## Results & Observations
+
+When you launch the app (either with python main.py … or via the Docker command shown above), you’ll see three kinds of outputs:
+
+1. Console logs
+2. Saved images under /imgs (mount this to a host folder to persist)
+3. Published messages (via Waggle plugin) containing detections & species results
+
+### 1. Console Logs
+You should see a sequence like:
+- Scene caption (Florence only, if enabled)
+  ```bash
+  Generating dynamic context caption for the scene...
+  Scene Context: "The image shows a red fence with multiple rows of small holes..."
+  ```
+- PTZ sweep & detection
+  ```bash
+    Trying PTZ: 0 0 1
+    Published detection: ptz.detection.p0t0z1
+    Plant detected (trees). Starting species identification workflow...
+  ```
+- Centering & zoom math (in degrees) and a best-of-N capture with blur score
+  ```bash
+  CAMERA MOVEMNET
+  zoom_level: 
+  current_h_fov: 
+  current_v_fov:
+  Move the camera to center the object
+  Pan:
+  Tilt:
+  
+  Taking final snapshot(s) for PlantNet... (Example output)
+  [PLANTNET] using image -> /imgs/50.19,-13.11,11.38_plantnet_try_2025-09-10_23:19:17.327619.jpg (blur=9242.4)
+  ```
+- PlantNet result (success)
+  ```bash
+  Species: Quercus garryana
+  Common Names: ['Garry oak', 'Oregon oak', 'Oregon white oak']
+  Score: 0.3217
+  ```
+- PlantNet error example (no match / 404) (Does not publish misclassification)
+  ```bash
+  PlantNet identification failed: PlantNet API request failed with status 404: {"statusCode":404,"error":"Not Found","message":"Species not found"}
+  ```
+
+### 2) Saved Images
+All captured frames land in /imgs inside the container. Mount it to your host to persist.
+Filename format: 
+```bash
+  <pan>,<tilt>,<zoom>_<action>_<YYYY-MM-DD_HH:MM:SS.ffffff>.jpg
+```
+Without --keepimages, interim candidates may be cleaned up; the final selection is kept when you mount /imgs
+
+### 3) Published Messages (Waggle) - Sample output
+- Scene caption (Florence): ptz.scene.caption — free-text description
+- Per-position detection: ptz.detection.p{pan}t{tilt}z{zoom}
+- Blur/sharpness telemetry: ptz.image.blur
+- PlantNet species (if any): ptz.plantnet.species
+- Plain score: ptz.plantnet.score
+- Alerts (optional, via alert_system.py): ptz.alert.<ALERT_TYPE> with the species JSON
+
+### What a “Good” Run Looks Like
+
+- Multiple `Trying PTZ: …` lines per iteration
+- At least one `ptz.detection.p...` with confidence ≥ your `--confidence`
+- For plant labels: centering/zoom logs, blur telemetry, PlantNet success block or a clear error
+- Images written to `imgs/` (mount or `--keepimages`)
+
+### Troubleshooting
+- No species shown: PlantNet may return 404/no match. Ensure `PLANTNET_API_KEY` is set; improve view (more leaves/flowers, less backlight), increase `--species_zoom`, or adjust framing.
+- Detections but no centering/zoom: Detection didn’t pass `--confidence`. Lower it slightly or ensure your `--objects` include plant terms (plant,tree,flower,bush,wildflower…).
+- No images on host: Mount `/imgs` (`-v "$(pwd)/imgs":/imgs`) or use `--keepimages`.
+- Soft images (low blur): Increase settle delays, try a larger `--species_zoom`, or lower `BLUR_MIN` to reduce retries.
+
+### How It Works
+- Detect objects with YOLO or Florence-2.
+- Route plants via a keyword map (tree, bush, flower, plant, …).
+- Center & maximize the bbox using FOV-based pan/tilt and relative zoom.
+- Best-of-N capture with Laplacian variance; pick the sharpest (optionally focus-jiggle retry).
+- PlantNet identify and publish results + blur telemetry + optional alerts.
