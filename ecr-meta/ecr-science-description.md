@@ -78,6 +78,14 @@ The application supports the following command-line arguments:
 - **`--species_zoom`**  
   Extra relative zoom step used for species detail (Default: 10).
 
+### Environment Variables
+- **`PLANTNET_API_KEY`**  
+  Required for PlantNet API calls.
+- **`BLUR_MIN`**  
+  Laplacian variance threshold to trigger a focus retry (default ~120).
+- **`SPECIES_MIN_SCORE`**  
+  Minimum PlantNet confidence to treat as “confident” (eg 0.25).
+
 ## Example Usage
 
 ### Using YOLO for Person Detection
