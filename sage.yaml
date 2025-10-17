@@ -1,18 +1,18 @@
-name: "ptzapp-yolo"
+name: "ptzapp"
 namespace: "waggle"
-description: "Intelligent Pan-Tilt-Zoom Camera - modified for YOLOv8-YOLO11 use"
-version: "0.1.14"
-authors: "Dario Dematties <ddematties@anl.gov>, Peter Lebiedzinski <piotr.lebiedzinski@northwestern.edu>"
+description: "Intelligent Pan-Tilt-Zoom camera app with YOLO/Florence detection and PlantNet species ID"
+version: "0.2.0"
+authors: "Saumya Pailwan <spailwan@anl.gov>, Dario Dematties <ddematties@anl.gov>, Peter Lebiedzinski <piotr.lebiedzinski@northwestern.edu>"
 collaborators: "The Sage Team"
 funding: "NSF 1935984, DOE"
 license: "Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License"
-keywords: "camera, ptz, pan, tilt, zoom, florence, waggle"
-homepage: "https://github.com/plebbyd/PTZ_APP"
+keywords: "camera, ptz, pan, tilt, zoom, yolo, florence, plantnet, waggle"
+homepage: "https://github.com/saumya-pailwan/PTZ_APP.git"
 source:
   architectures:
     - "linux/amd64"
     - "linux/arm64"
-  url: "https://github.com/plebbyd/PTZ_APP.git"
+  url: "https://github.com/saumya-pailwan/PTZ_APP.git"
   branch: "main"
 
 inputs:
@@ -42,3 +42,7 @@ inputs:
    type: "boolean"
  - id: "debug"
    type: "boolean"
+ - id: "prompt_prefix"
+   type: "string"
+ - id: "species_zoom"
+   type: "int"
