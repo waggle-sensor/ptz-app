@@ -76,6 +76,14 @@ To detect all objects using Florence models, use the asterisk:
 sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects '*'
 ```
 
+### Saving multiple images per discrete sweep location
+
+To save multiple images when there are multiple detections in a single frame, use the `--multiple` flag:
+
+```bash
+sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --model Florence-base --objects '*' --multiple
+```
+
 **Note:** When using `'*'` with Florence models, the application runs in the `<OD>` task mode, which enables general object detection without filtering for specific classes. This can be useful for inventorying all objects in a scene but may produce more diverse results than when targeting specific objects.
 
 ## Command Line Arguments
@@ -95,3 +103,4 @@ sudo docker run --gpus all -it --rm your_docker_hub_user_name/ptzapp:latest --mo
 | `--confidence` | `-conf` | Confidence threshold (0-1) | 0.1 |
 | `--iterdelay` | `-id` | Minimum delay in seconds between iterations | 60.0 |
 | `--debug` | | Enable debug level logging | False |
+| `--multiple` | | Save multiple images for multiple detections in a single frame | False |

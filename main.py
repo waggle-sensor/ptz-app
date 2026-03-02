@@ -5,7 +5,9 @@ import time
 from PIL import Image
 from source.bring_data import (
     center_and_maximize_object,
+    center_and_maximize_objects_absolute,
     get_image_from_ptz_position,
+    get_image_from_ptz_position_multiboxes,
     publish_images,
 )
 from source.object_detector import DetectorFactory
@@ -66,9 +68,27 @@ def get_argparser():
     parser.add_argument(
         "-m",
         "--model",
-        help="Model to use (e.g., 'yolo11n', 'Florence-base')",
+        help="Model(s) to use (comma-separated for multiple, e.g., 'yolo11n' or 'yolo11n,Florence-base' or 'BioCLIP')",
         type=str,
         default="yolo11n",
+    )
+    parser.add_argument(
+        "--bioclip-rank",
+        help="Taxonomic rank for BioCLIP classification (default=Class). Options: Kingdom, Phylum, Class, Order, Family, Genus, Species",
+        type=str,
+        default="Class",
+    )
+    parser.add_argument(
+        "--bioclip-taxon",
+        help="Target taxon for BioCLIP to detect (default='Animalia Chordata Mammalia' for mammals). Examples: 'Animalia Chordata Aves' (birds), 'Animalia Arthropoda Insecta' (insects)",
+        type=str,
+        default="Animalia Chordata Mammalia",
+    )
+    parser.add_argument(
+        "--bioclip-confidence",
+        help="Confidence threshold for BioCLIP detections (0-1, default=0.3)",
+        type=float,
+        default=0.3,
     )
     parser.add_argument(
         "-id",
@@ -84,6 +104,17 @@ def get_argparser():
         type=float,
         default=0.1,
     )
+    parser.add_argument(
+        "-multiple",
+        "--multiple",
+        help="Save multiple images for each discrete PTZ position (default=False)",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--debug-detections",
+        action="store_true",
+        help="Publish images with detection boxes drawn for debugging",
+    )
 
     return parser
 
@@ -94,40 +125,84 @@ def look_for_object(args):
     tilts = [args.tilt for _ in range(len(pans))]
     zooms = [args.zoom for _ in range(len(pans))]
 
-    try:
-        detector = DetectorFactory.create_detector(args.model, args.objects)
-    except ValueError as e:
-        print(f"Error creating detector: {str(e)}")
+    # Parse model string - can be single or comma-separated list
+    model_names = [model.strip() for model in args.model.split(",")]
+    
+    # Create detectors for each model
+    detectors = []
+    for model_name in model_names:
+        try:
+            # Pass BioCLIP-specific parameters if it's a BioCLIP model
+            if 'bioclip' in model_name.lower():
+                detector = DetectorFactory.create_detector(
+                    model_name, 
+                    args.objects,
+                    bioclip_rank=args.bioclip_rank,
+                    bioclip_taxon=args.bioclip_taxon,
+                    bioclip_confidence=args.bioclip_confidence
+                )
+            else:
+                detector = DetectorFactory.create_detector(model_name, args.objects)
+            
+            detectors.append(detector)
+            print(f"Successfully loaded model: {model_name}")
+        except ValueError as e:
+            print(f"Error creating detector for {model_name}: {str(e)}")
+            sys.exit(1)
+    
+    if not detectors:
+        print("No valid detectors created")
         sys.exit(1)
 
     for iteration in range(args.iterations):
         iteration_start_time = time.time()
 
-        for pan, tilt, zoom in zip(pans, tilts, zooms):
-            print(f"Trying PTZ: {pan} {tilt} {zoom}")
-            image_path, detection = get_image_from_ptz_position(
-                args, objects, pan, tilt, zoom, detector, None
-            )
+        for idx, (pan, tilt, zoom) in enumerate(zip(pans, tilts, zooms)):
+            # Create increment ID based on initial PTZ position
+            increment_id = f"scan_{pan:03d}_{tilt:03d}_{zoom:02d}"
+            print(f"Trying PTZ: {pan} {tilt} {zoom} (ID: {increment_id})")
 
-            if detection is None or detection["reward"] > (1 - args.confidence):
-                if image_path and os.path.exists(image_path):
-                    os.remove(image_path)
-                continue
+            if not args.multiple:
+                image_path, detection = get_image_from_ptz_position(
+                    args, objects, pan, tilt, zoom, detectors, None, args.debug_detections, increment_id
+                )
+                if detection is None or detection["reward"] > (1 - args.confidence):
+                    if image_path and os.path.exists(image_path):
+                        os.remove(image_path)
+                    continue
 
-            label = detection["label"]
-            bbox = detection["bbox"]
-            reward = detection["reward"]
-            confidence = 1 - reward
+                label = detection["label"]
+                bbox = detection["bbox"]
+                reward = detection["reward"]
+                model_name = detection.get("model", None)
+                confidence = 1 - reward
 
-            print(f"Following {label} object (confidence: {confidence:.2f})")
+                model_info = f" detected by {model_name}" if model_name else ""
+                print(f"Following {label} object (confidence: {confidence:.2f}){model_info}")
 
-            image = Image.open(image_path)
-            center_and_maximize_object(args, bbox, image, reward, label)
+                image = Image.open(image_path)
+                center_and_maximize_object(args, bbox, image, reward, label, increment_id, model_name)
+            else:
+                # get multiple images for each detection
+                image_path, detections = get_image_from_ptz_position_multiboxes(
+                    args, objects, pan, tilt, zoom, detectors, None, args.debug_detections, increment_id
+                )
+                
+                if not detections:
+                    if image_path and os.path.exists(image_path):
+                        os.remove(image_path)
+                    continue
+                
+                image = Image.open(image_path)
+                center_and_maximize_objects_absolute(args, detections, image, increment_id)
+                
+
 
             if os.path.exists(image_path):
                 os.remove(image_path)
 
-        publish_images()
+            # Publish images after each increment
+            publish_images()
 
         iteration_time = time.time() - iteration_start_time
         if args.iterdelay > 0:

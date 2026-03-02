@@ -53,6 +53,8 @@ The application supports the following command-line arguments:
   Keep collected images in persistent folder for later use (Default: False)
 - **`--debug`**  
   Enable debug level logging (Default: False)
+- **`--multiple`**  
+  Save multiple images for multiple detections in a single frame (Default: False)
 
 ## Example Usage
 
@@ -69,6 +71,11 @@ python main.py -it 5 -obj "person,car,dog" -un admin -pw secret -ip 192.168.1.10
 ### Using Florence for General Object Detection
 ```bash
 python main.py -it 5 -obj "*" -un username -pw 'password' -ip 130.202.23.92 -m Florence-base -conf 0.15
+```
+
+### Saving multiple images per discrete sweep location
+```bash
+python main.py -it 5 -obj "*" -un username -pw 'password' -ip 130.202.23.92 -m Florence-base  --multiple
 ```
 
 # Ontology
