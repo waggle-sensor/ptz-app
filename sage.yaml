@@ -1,7 +1,7 @@
 name: "ptzapp-yolo"
 namespace: "waggle"
 description: "Intelligent Pan-Tilt-Zoom Camera - modified for YOLOv8-YOLO11 use"
-version: "0.1.33"
+version: "0.1.34"
 authors: "Dario Dematties <ddematties@anl.gov>, Peter Lebiedzinski <piotr.lebiedzinski@northwestern.edu>"
 collaborators: "The Sage Team"
 funding: "NSF 1935984, DOE"
